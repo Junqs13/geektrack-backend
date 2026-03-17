@@ -1,24 +1,22 @@
 const express = require('express');
 const cors = require('cors');
-const db = require('./database'); // Importa nossa configuração do banco
+const db = require('./database'); 
 
 const app = express();
 const PORT = 3001; 
 
-// Middlewares
 app.use(cors());
 app.use(express.json());
 
-// Rota de teste básica
 app.get('/', (req, res) => {
-    res.send('API do GeekTrack está rodando!');
+    res.send('API do GeekTrack está rodando no MySQL!');
 });
 
 // ==========================================
 // ROTAS PARA CATEGORIAS
 // ==========================================
 
-// 1. CREATE: Rota para criar uma nova categoria (POST)
+// 1. CREATE: POST
 app.post('/categorias', (req, res) => {
     const { nome } = req.body; 
     
@@ -28,23 +26,23 @@ app.post('/categorias', (req, res) => {
 
     const query = `INSERT INTO categorias (nome) VALUES (?)`;
     
-    db.run(query, [nome], function(err) {
+    db.query(query, [nome], (err, results) => {
         if (err) {
             return res.status(500).json({ erro: err.message });
         }
-        res.status(201).json({ id: this.lastID, nome: nome });
+        res.status(201).json({ id: results.insertId, nome: nome });
     });
 });
 
-// 2. READ: Rota para listar todas as categorias (GET)
+// 2. READ: GET
 app.get('/categorias', (req, res) => {
     const query = `SELECT * FROM categorias`;
     
-    db.all(query, [], (err, rows) => {
+    db.query(query, (err, results) => {
         if (err) {
             return res.status(500).json({ erro: err.message });
         }
-        res.json(rows);
+        res.json(results);
     });
 });
 
@@ -52,7 +50,7 @@ app.get('/categorias', (req, res) => {
 // ROTAS PARA ITENS (O ACERVO GEEK E MUSICAL)
 // ==========================================
 
-// 1. CREATE: Cadastrar um novo item no acervo (POST)
+// 1. CREATE: POST
 app.post('/itens', (req, res) => {
     const { titulo, tipo, foto_url, consumido, categoria_id } = req.body;
 
@@ -62,24 +60,23 @@ app.post('/itens', (req, res) => {
 
     const query = `INSERT INTO itens (titulo, tipo, foto_url, consumido, categoria_id) VALUES (?, ?, ?, ?, ?)`;
     
-    // O SQLite não tem um tipo booleano real, então salvamos true como 1 e false como 0
+    // No MySQL, o BOOLEAN é tratado como TINYINT (1 ou 0)
     const valorConsumido = consumido ? 1 : 0; 
 
-    db.run(query, [titulo, tipo, foto_url, valorConsumido, categoria_id], function(err) {
+    db.query(query, [titulo, tipo, foto_url, valorConsumido, categoria_id], (err, results) => {
         if (err) {
             return res.status(500).json({ erro: err.message });
         }
         res.status(201).json({ 
-            id: this.lastID, 
+            id: results.insertId, 
             titulo: titulo, 
             mensagem: 'Item cadastrado com sucesso no acervo!' 
         });
     });
 });
 
-// 2. READ: Listar todos os itens com suas categorias (GET)
+// 2. READ: GET
 app.get('/itens', (req, res) => {
-    // Usamos LEFT JOIN para trazer o nome da categoria junto com o item
     const query = `
         SELECT 
             itens.id, 
@@ -92,18 +89,58 @@ app.get('/itens', (req, res) => {
         LEFT JOIN categorias ON itens.categoria_id = categorias.id
     `;
     
-    db.all(query, [], (err, rows) => {
+    db.query(query, (err, results) => {
         if (err) {
             return res.status(500).json({ erro: err.message });
         }
         
-        // Converte o 0 e 1 do banco de volta para false/true no JSON 
-        const itensFormatados = rows.map(item => ({
+        const itensFormatados = results.map(item => ({
             ...item,
             consumido: item.consumido === 1
         }));
 
         res.json(itensFormatados);
+    });
+});
+
+// 3. UPDATE: PUT
+app.put('/itens/:id', (req, res) => {
+    const { id } = req.params; 
+    const { titulo, tipo, foto_url, consumido, categoria_id } = req.body;
+
+    const query = `
+        UPDATE itens 
+        SET titulo = ?, tipo = ?, foto_url = ?, consumido = ?, categoria_id = ? 
+        WHERE id = ?
+    `;
+    
+    const valorConsumido = consumido ? 1 : 0; 
+
+    db.query(query, [titulo, tipo, foto_url, valorConsumido, categoria_id, id], (err, results) => {
+        if (err) {
+            return res.status(500).json({ erro: err.message });
+        }
+        if (results.affectedRows === 0) {
+            return res.status(404).json({ erro: 'Item não encontrado para atualização.' });
+        }
+        res.json({ mensagem: 'Item atualizado com sucesso!' });
+    });
+});
+
+// 4. DELETE: DELETE
+app.delete('/itens/:id', (req, res) => {
+    const { id } = req.params;
+
+    const query = `DELETE FROM itens WHERE id = ?`;
+
+    db.query(query, [id], (err, results) => {
+        if (err) {
+            return res.status(500).json({ erro: err.message });
+        }
+        if (results.affectedRows === 0) {
+            return res.status(404).json({ erro: 'Item não encontrado para exclusão.' });
+        }
+        res.json({ mensagem: 'Item removido do acervo com sucesso!' });
     });
 });
 

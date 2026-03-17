@@ -1,50 +1,65 @@
-const sqlite3 = require('sqlite3').verbose();
+const mysql = require('mysql2');
 
-// Conecta ao banco de dados (isso criará o arquivo database.sqlite na sua pasta)
-const db = new sqlite3.Database('./database.sqlite', (err) => {
-    if (err) {
-        console.error('Erro ao conectar ao banco de dados:', err.message);
-    } else {
-        console.log('Conectado com sucesso ao banco de dados SQLite.');
-    }
+// Cria a conexão com o MySQL do XAMPP (usuário root e sem senha por padrão)
+const db = mysql.createConnection({
+    host: 'localhost',
+    user: 'root',
+    password: '',
+    database: 'geektrack_db' // O banco que você acabou de criar no phpMyAdmin
 });
 
-// Criação das Tabelas
-db.serialize(() => {
-    // Tabela de Categorias
-    db.run(`CREATE TABLE IF NOT EXISTS categorias (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nome TEXT NOT NULL
-    )`);
+db.connect((err) => {
+    if (err) {
+        console.error('Erro ao conectar ao MySQL:', err.message);
+        return;
+    }
+    console.log('Conectado com sucesso ao banco de dados MySQL (XAMPP).');
 
-    // Tabela de Usuários
-    db.run(`CREATE TABLE IF NOT EXISTS usuarios (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nome TEXT NOT NULL,
-        email TEXT UNIQUE NOT NULL
-    )`);
+    // Criação das Tabelas (Sintaxe adaptada para MySQL)
+    const criarTabelaCategorias = `
+        CREATE TABLE IF NOT EXISTS categorias (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            nome VARCHAR(255) NOT NULL
+        )
+    `;
 
-    // Tabela de Itens (O Acervo Geek e Musical)
-    db.run(`CREATE TABLE IF NOT EXISTS itens (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        titulo TEXT NOT NULL,
-        tipo TEXT NOT NULL, -- Ex: 'Vinil', 'Jogo', 'Quadrinho'
-        foto_url TEXT,
-        consumido BOOLEAN DEFAULT 0, -- 0 para falso, 1 para verdadeiro
-        categoria_id INTEGER,
-        FOREIGN KEY (categoria_id) REFERENCES categorias (id)
-    )`);
+    const criarTabelaUsuarios = `
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            nome VARCHAR(255) NOT NULL,
+            email VARCHAR(255) UNIQUE NOT NULL
+        )
+    `;
 
-    // Tabela de Empréstimos
-    db.run(`CREATE TABLE IF NOT EXISTS emprestimos (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        data_emprestimo DATE DEFAULT CURRENT_DATE,
-        data_devolucao DATE,
-        item_id INTEGER,
-        usuario_id INTEGER,
-        FOREIGN KEY (item_id) REFERENCES itens (id),
-        FOREIGN KEY (usuario_id) REFERENCES usuarios (id)
-    )`);
+    const criarTabelaItens = `
+        CREATE TABLE IF NOT EXISTS itens (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            titulo VARCHAR(255) NOT NULL,
+            tipo VARCHAR(50) NOT NULL,
+            foto_url VARCHAR(255),
+            consumido BOOLEAN DEFAULT FALSE,
+            categoria_id INT,
+            FOREIGN KEY (categoria_id) REFERENCES categorias(id) ON DELETE SET NULL
+        )
+    `;
+
+    const criarTabelaEmprestimos = `
+        CREATE TABLE IF NOT EXISTS emprestimos (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            data_emprestimo DATE DEFAULT (CURRENT_DATE),
+            data_devolucao DATE,
+            item_id INT,
+            usuario_id INT,
+            FOREIGN KEY (item_id) REFERENCES itens(id) ON DELETE CASCADE,
+            FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
+        )
+    `;
+
+    // Executa as queries de criação
+    db.query(criarTabelaCategorias, (err) => { if (err) console.error("Erro Categorias:", err.message); });
+    db.query(criarTabelaUsuarios, (err) => { if (err) console.error("Erro Usuários:", err.message); });
+    db.query(criarTabelaItens, (err) => { if (err) console.error("Erro Itens:", err.message); });
+    db.query(criarTabelaEmprestimos, (err) => { if (err) console.error("Erro Empréstimos:", err.message); });
 });
 
 module.exports = db;
