@@ -1,3 +1,6 @@
+require('dotenv').config();
+
+const bcrypt = require('bcrypt');
 const express = require('express');
 const cors = require('cors');
 const db = require('./database'); 
@@ -6,7 +9,7 @@ const path = require('path');
 const fs = require('fs');
 
 const app = express();
-const PORT = 3001; 
+const PORT = process.env.PORT || 3001; 
 
 // ==========================================
 // 1. CONFIGURAÇÕES GERAIS
@@ -31,15 +34,23 @@ const storage = multer.diskStorage({
 const upload = multer({ storage: storage });
 
 // ==========================================
-// 2. ROTA DE LOGIN (AUTENTICAÇÃO)
+// 2. ROTA DE LOGIN (AUTENTICAÇÃO SEGURO)
 // ==========================================
 app.post('/login', (req, res) => {
     const { email, senha } = req.body;
-    db.query(`SELECT * FROM usuarios WHERE email = ? AND senha = ?`, [email, senha], (err, results) => {
+    
+    db.query(`SELECT * FROM usuarios WHERE email = ?`, [email], async (err, results) => {
         if (err) return res.status(500).json({ erro: err.message });
+        
+        // Se não achou o e-mail
         if (results.length === 0) return res.status(401).json({ erro: 'Email ou senha incorretos!' });
         
         const user = results[0];
+        
+        // Compara a senha digitada em texto com a senha embaralhada no banco
+        const senhaValida = await bcrypt.compare(senha, user.senha);
+        if (!senhaValida) return res.status(401).json({ erro: 'Email ou senha incorretos!' });
+        
         res.json({ id: user.id, nome: user.nome, email: user.email, perfil: user.perfil });
     });
 });
@@ -62,18 +73,33 @@ app.get('/categorias', (req, res) => {
     });
 });
 
-// ==========================================
+/// ==========================================
 // 4. ROTAS PARA USUÁRIOS (MEMBROS)
 // ==========================================
-app.post('/usuarios', (req, res) => {
+app.post('/usuarios', async (req, res) => {
     const { nome, email, senha, perfil } = req.body;
-    const senhaFinal = senha || '123456';
-    const perfilFinal = perfil || 'membro';
 
-    db.query(`INSERT INTO usuarios (nome, email, senha, perfil) VALUES (?, ?, ?, ?)`, 
-    [nome, email, senhaFinal, perfilFinal], (err, results) => {
+    // 1. Validação: Verifica se o e-mail já existe no banco
+    db.query(`SELECT id FROM usuarios WHERE email = ?`, [email], async (err, results) => {
         if (err) return res.status(500).json({ erro: err.message });
-        res.status(201).json({ id: results.insertId, nome, email, perfil: perfilFinal });
+        if (results.length > 0) return res.status(400).json({ erro: 'Este e-mail já está cadastrado no sistema!' });
+
+        try {
+            // 2. Criptografia: Embaralha a senha
+            const senhaFinal = senha || '123456';
+            const salt = await bcrypt.genSalt(10);
+            const senhaCriptografada = await bcrypt.hash(senhaFinal, salt);
+            const perfilFinal = perfil || 'membro';
+
+            // 3. Salva no banco com a senha protegida
+            db.query(`INSERT INTO usuarios (nome, email, senha, perfil) VALUES (?, ?, ?, ?)`, 
+            [nome, email, senhaCriptografada, perfilFinal], (err, insertResults) => {
+                if (err) return res.status(500).json({ erro: err.message });
+                res.status(201).json({ id: insertResults.insertId, nome, email, perfil: perfilFinal });
+            });
+        } catch (error) {
+            res.status(500).json({ erro: 'Erro ao processar a senha.' });
+        }
     });
 });
 
@@ -166,18 +192,22 @@ app.get('/itens/:id/historico', (req, res) => {
 // ==========================================
 app.post('/emprestar', (req, res) => {
     const { item_id, usuario_id } = req.body;
-    db.query(`INSERT INTO emprestimos (item_id, usuario_id, data_emprestimo) VALUES (?, ?, CURRENT_DATE)`, 
-    [item_id, usuario_id], (err) => {
-        if (err) return res.status(500).json({ erro: err.message });
-        res.status(201).json({ mensagem: 'Empréstimo registrado com sucesso!' });
-    });
-});
 
-app.put('/devolver/:emprestimo_id', (req, res) => {
-    db.query(`UPDATE emprestimos SET data_devolucao = CURRENT_DATE WHERE id = ?`, 
-    [req.params.emprestimo_id], (err) => {
+    // 1. Verifica se o item JÁ ESTÁ emprestado (data_devolucao é nula)
+    db.query(`SELECT id FROM emprestimos WHERE item_id = ? AND data_devolucao IS NULL`, [item_id], (err, results) => {
         if (err) return res.status(500).json({ erro: err.message });
-        res.json({ mensagem: 'Devolução registrada com sucesso!' });
+        
+        // Se achou um registro, é porque o item ainda não foi devolvido!
+        if (results.length > 0) {
+            return res.status(400).json({ erro: 'Este item já está emprestado para outra pessoa!' });
+        }
+
+        // 2. Se passou na validação, registra o novo empréstimo
+        db.query(`INSERT INTO emprestimos (item_id, usuario_id, data_emprestimo) VALUES (?, ?, CURRENT_DATE)`, 
+        [item_id, usuario_id], (err) => {
+            if (err) return res.status(500).json({ erro: err.message });
+            res.status(201).json({ mensagem: 'Empréstimo registrado com sucesso!' });
+        });
     });
 });
 
