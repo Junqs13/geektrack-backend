@@ -1,151 +1,212 @@
 const express = require('express');
 const cors = require('cors');
 const db = require('./database'); 
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 
 const app = express();
 const PORT = 3001; 
 
+// ==========================================
+// 1. CONFIGURAÇÕES GERAIS
+// ==========================================
 app.use(cors());
 app.use(express.json());
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-app.get('/', (req, res) => {
-    res.send('API do GeekTrack está rodando no MySQL!');
+const uploadDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadDir)) { 
+    fs.mkdirSync(uploadDir); 
+}
+
+const storage = multer.diskStorage({
+    destination: function (req, file, cb) { 
+        cb(null, uploadDir); 
+    },
+    filename: function (req, file, cb) { 
+        cb(null, Date.now() + '-' + file.originalname.replace(/\s+/g, '-')); 
+    }
+});
+const upload = multer({ storage: storage });
+
+// ==========================================
+// 2. ROTA DE LOGIN (AUTENTICAÇÃO)
+// ==========================================
+app.post('/login', (req, res) => {
+    const { email, senha } = req.body;
+    db.query(`SELECT * FROM usuarios WHERE email = ? AND senha = ?`, [email, senha], (err, results) => {
+        if (err) return res.status(500).json({ erro: err.message });
+        if (results.length === 0) return res.status(401).json({ erro: 'Email ou senha incorretos!' });
+        
+        const user = results[0];
+        res.json({ id: user.id, nome: user.nome, email: user.email, perfil: user.perfil });
+    });
 });
 
 // ==========================================
-// ROTAS PARA CATEGORIAS
+// 3. ROTAS PARA CATEGORIAS
 // ==========================================
-
-// 1. CREATE: POST
 app.post('/categorias', (req, res) => {
-    const { nome } = req.body; 
-    
-    if (!nome) {
-        return res.status(400).json({ erro: 'O nome da categoria é obrigatório.' });
-    }
-
-    const query = `INSERT INTO categorias (nome) VALUES (?)`;
-    
-    db.query(query, [nome], (err, results) => {
-        if (err) {
-            return res.status(500).json({ erro: err.message });
-        }
+    const { nome } = req.body;
+    db.query(`INSERT INTO categorias (nome) VALUES (?)`, [nome], (err, results) => {
+        if (err) return res.status(500).json({ erro: err.message });
         res.status(201).json({ id: results.insertId, nome: nome });
     });
 });
 
-// 2. READ: GET
 app.get('/categorias', (req, res) => {
-    const query = `SELECT * FROM categorias`;
-    
-    db.query(query, (err, results) => {
-        if (err) {
-            return res.status(500).json({ erro: err.message });
-        }
+    db.query(`SELECT * FROM categorias`, (err, results) => {
+        if (err) return res.status(500).json({ erro: err.message });
         res.json(results);
     });
 });
 
 // ==========================================
-// ROTAS PARA ITENS (O ACERVO GEEK E MUSICAL)
+// 4. ROTAS PARA USUÁRIOS (MEMBROS)
 // ==========================================
+app.post('/usuarios', (req, res) => {
+    const { nome, email, senha, perfil } = req.body;
+    const senhaFinal = senha || '123456';
+    const perfilFinal = perfil || 'membro';
 
-// 1. CREATE: POST
-app.post('/itens', (req, res) => {
-    const { titulo, tipo, foto_url, consumido, categoria_id } = req.body;
-
-    if (!titulo || !tipo || !categoria_id) {
-        return res.status(400).json({ erro: 'Título, tipo e ID da categoria são obrigatórios.' });
-    }
-
-    const query = `INSERT INTO itens (titulo, tipo, foto_url, consumido, categoria_id) VALUES (?, ?, ?, ?, ?)`;
-    
-    // No MySQL, o BOOLEAN é tratado como TINYINT (1 ou 0)
-    const valorConsumido = consumido ? 1 : 0; 
-
-    db.query(query, [titulo, tipo, foto_url, valorConsumido, categoria_id], (err, results) => {
-        if (err) {
-            return res.status(500).json({ erro: err.message });
-        }
-        res.status(201).json({ 
-            id: results.insertId, 
-            titulo: titulo, 
-            mensagem: 'Item cadastrado com sucesso no acervo!' 
-        });
+    db.query(`INSERT INTO usuarios (nome, email, senha, perfil) VALUES (?, ?, ?, ?)`, 
+    [nome, email, senhaFinal, perfilFinal], (err, results) => {
+        if (err) return res.status(500).json({ erro: err.message });
+        res.status(201).json({ id: results.insertId, nome, email, perfil: perfilFinal });
     });
 });
 
-// 2. READ: GET
+app.get('/usuarios', (req, res) => {
+    db.query(`SELECT id, nome, email, perfil FROM usuarios`, (err, results) => {
+        if (err) return res.status(500).json({ erro: err.message });
+        res.json(results);
+    });
+});
+
+app.delete('/usuarios/:id', (req, res) => {
+    const { id } = req.params;
+    db.query(`DELETE FROM usuarios WHERE id = ?`, [id], (err) => {
+        if (err) return res.status(500).json({ erro: err.message });
+        res.json({ mensagem: 'Usuário removido com sucesso!' });
+    });
+});
+
+// ==========================================
+// 5. ROTAS PARA ITENS (ACERVO)
+// ==========================================
+app.post('/itens', upload.single('foto'), (req, res) => {
+    const { titulo, tipo, consumido, categoria_id } = req.body;
+    const foto_url = req.file ? `http://localhost:3001/uploads/${req.file.filename}` : null;
+    const valorConsumido = (consumido === 'true') ? 1 : 0; 
+
+    const query = `INSERT INTO itens (titulo, tipo, foto_url, consumido, categoria_id) VALUES (?, ?, ?, ?, ?)`;
+    db.query(query, [titulo, tipo, foto_url, valorConsumido, categoria_id], (err, results) => {
+        if (err) return res.status(500).json({ erro: err.message });
+        res.status(201).json({ id: results.insertId, titulo });
+    });
+});
+
 app.get('/itens', (req, res) => {
     const query = `
         SELECT 
-            itens.id, 
-            itens.titulo, 
-            itens.tipo, 
-            itens.foto_url, 
-            itens.consumido, 
-            categorias.nome AS categoria_nome 
+            itens.id, itens.titulo, itens.tipo, itens.foto_url, itens.consumido, itens.categoria_id,
+            categorias.nome AS categoria_nome,
+            usuarios.nome AS emprestado_para,
+            emprestimos.id AS emprestimo_id,
+            emprestimos.data_emprestimo
         FROM itens 
         LEFT JOIN categorias ON itens.categoria_id = categorias.id
+        LEFT JOIN emprestimos ON itens.id = emprestimos.item_id AND emprestimos.data_devolucao IS NULL
+        LEFT JOIN usuarios ON emprestimos.usuario_id = usuarios.id
+        ORDER BY itens.id DESC
     `;
-    
     db.query(query, (err, results) => {
-        if (err) {
-            return res.status(500).json({ erro: err.message });
-        }
-        
-        const itensFormatados = results.map(item => ({
-            ...item,
-            consumido: item.consumido === 1
-        }));
-
-        res.json(itensFormatados);
+        if (err) return res.status(500).json({ erro: err.message });
+        res.json(results.map(item => ({ ...item, consumido: item.consumido === 1 })));
     });
 });
 
-// 3. UPDATE: PUT
-app.put('/itens/:id', (req, res) => {
+app.put('/itens/:id', upload.single('foto'), (req, res) => {
     const { id } = req.params; 
-    const { titulo, tipo, foto_url, consumido, categoria_id } = req.body;
+    const { titulo, tipo, consumido, categoria_id, foto_url_existente } = req.body;
+    const foto_url = req.file ? `http://localhost:3001/uploads/${req.file.filename}` : foto_url_existente;
+    const valorConsumido = (consumido === 'true' || consumido === true || consumido === 1) ? 1 : 0; 
 
-    const query = `
-        UPDATE itens 
-        SET titulo = ?, tipo = ?, foto_url = ?, consumido = ?, categoria_id = ? 
-        WHERE id = ?
-    `;
-    
-    const valorConsumido = consumido ? 1 : 0; 
-
-    db.query(query, [titulo, tipo, foto_url, valorConsumido, categoria_id, id], (err, results) => {
-        if (err) {
-            return res.status(500).json({ erro: err.message });
-        }
-        if (results.affectedRows === 0) {
-            return res.status(404).json({ erro: 'Item não encontrado para atualização.' });
-        }
+    const query = `UPDATE itens SET titulo = ?, tipo = ?, foto_url = ?, consumido = ?, categoria_id = ? WHERE id = ?`;
+    db.query(query, [titulo, tipo, foto_url, valorConsumido, categoria_id, id], (err) => {
+        if (err) return res.status(500).json({ erro: err.message });
         res.json({ mensagem: 'Item atualizado com sucesso!' });
     });
 });
 
-// 4. DELETE: DELETE
 app.delete('/itens/:id', (req, res) => {
-    const { id } = req.params;
+    db.query(`DELETE FROM itens WHERE id = ?`, [req.params.id], (err) => {
+        if (err) return res.status(500).json({ erro: err.message });
+        res.json({ mensagem: 'Item removido do acervo!' });
+    });
+});
 
-    const query = `DELETE FROM itens WHERE id = ?`;
-
-    db.query(query, [id], (err, results) => {
-        if (err) {
-            return res.status(500).json({ erro: err.message });
-        }
-        if (results.affectedRows === 0) {
-            return res.status(404).json({ erro: 'Item não encontrado para exclusão.' });
-        }
-        res.json({ mensagem: 'Item removido do acervo com sucesso!' });
+app.get('/itens/:id/historico', (req, res) => {
+    const query = `
+        SELECT e.data_emprestimo, e.data_devolucao, u.nome AS usuario_nome
+        FROM emprestimos e
+        JOIN usuarios u ON e.usuario_id = u.id
+        WHERE e.item_id = ?
+        ORDER BY e.data_emprestimo DESC
+    `;
+    db.query(query, [req.params.id], (err, results) => {
+        if (err) return res.status(500).json({ erro: err.message });
+        res.json(results);
     });
 });
 
 // ==========================================
-// INICIANDO O SERVIDOR
+// 6. ROTAS PARA EMPRÉSTIMOS E DEVOLUÇÕES
+// ==========================================
+app.post('/emprestar', (req, res) => {
+    const { item_id, usuario_id } = req.body;
+    db.query(`INSERT INTO emprestimos (item_id, usuario_id, data_emprestimo) VALUES (?, ?, CURRENT_DATE)`, 
+    [item_id, usuario_id], (err) => {
+        if (err) return res.status(500).json({ erro: err.message });
+        res.status(201).json({ mensagem: 'Empréstimo registrado com sucesso!' });
+    });
+});
+
+app.put('/devolver/:emprestimo_id', (req, res) => {
+    db.query(`UPDATE emprestimos SET data_devolucao = CURRENT_DATE WHERE id = ?`, 
+    [req.params.emprestimo_id], (err) => {
+        if (err) return res.status(500).json({ erro: err.message });
+        res.json({ mensagem: 'Devolução registrada com sucesso!' });
+    });
+});
+
+// ==========================================
+// 7. ESTATÍSTICAS E DASHBOARD
+// ==========================================
+app.get('/estatisticas', (req, res) => {
+    const stats = {};
+    const q1 = `SELECT i.titulo, COUNT(e.id) AS total_vezes FROM emprestimos e JOIN itens i ON e.item_id = i.id GROUP BY i.id ORDER BY total_vezes DESC LIMIT 5`;
+    const q2 = `SELECT u.nome, COUNT(e.id) AS total_pegos FROM emprestimos e JOIN usuarios u ON e.usuario_id = u.id GROUP BY u.id ORDER BY total_pegos DESC LIMIT 5`;
+    const q3 = `SELECT i.titulo, u.nome AS usuario, e.data_emprestimo, DATEDIFF(CURRENT_DATE, e.data_emprestimo) AS dias_atraso FROM emprestimos e JOIN itens i ON e.item_id = i.id JOIN usuarios u ON e.usuario_id = u.id WHERE e.data_devolucao IS NULL AND DATEDIFF(CURRENT_DATE, e.data_emprestimo) > 14 ORDER BY dias_atraso DESC`;
+
+    db.query(q1, (err, res1) => {
+        if (err) return res.status(500).json({erro: err.message});
+        stats.topItens = res1;
+        db.query(q2, (err, res2) => {
+            if (err) return res.status(500).json({erro: err.message});
+            stats.topUsuarios = res2;
+            db.query(q3, (err, res3) => {
+                if (err) return res.status(500).json({erro: err.message});
+                stats.atrasados = res3;
+                res.json(stats);
+            });
+        });
+    });
+});
+
+// ==========================================
+// 8. INICIANDO O SERVIDOR
 // ==========================================
 app.listen(PORT, () => {
     console.log(`Servidor rodando na porta ${PORT}`);
