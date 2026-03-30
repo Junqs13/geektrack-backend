@@ -110,11 +110,33 @@ app.get('/usuarios', (req, res) => {
     });
 });
 
+// ROTA PARA DELETAR USUÁRIOS COM TRAVA DE INTEGRIDADE
 app.delete('/usuarios/:id', (req, res) => {
     const { id } = req.params;
-    db.query(`DELETE FROM usuarios WHERE id = ?`, [id], (err) => {
-        if (err) return res.status(500).json({ erro: err.message });
-        res.json({ mensagem: 'Usuário removido com sucesso!' });
+
+    // 1. Verifica primeiro se o utilizador tem empréstimos pendentes (não devolvidos)
+    const queryVerificacao = `SELECT id FROM emprestimos WHERE usuario_id = ? AND data_devolucao IS NULL`;
+    
+    db.query(queryVerificacao, [id], (err, results) => {
+        if (err) {
+            console.error("[ERRO VERIFICACAO EXCLUSAO]:", err.message);
+            return res.status(500).json({ erro: err.message });
+        }
+
+        // Se a lista de resultados for maior que 0, a trava é ativada!
+        if (results.length > 0) {
+            console.log(`[BLOQUEIO] Tentativa de apagar o utilizador ${id} bloqueada por pendências.`);
+            return res.status(400).json({ erro: 'Não é possível remover este membro. Ele ainda possui itens não devolvidos!' });
+        }
+
+        // 2. Se passou na validação (array vazio), podemos apagar o utilizador em segurança
+        db.query(`DELETE FROM usuarios WHERE id = ?`, [id], (errDelete) => {
+            if (errDelete) {
+                console.error("[ERRO DELETE USUARIO]:", errDelete.message);
+                return res.status(500).json({ erro: errDelete.message });
+            }
+            res.json({ mensagem: 'Membro removido com sucesso!' });
+        });
     });
 });
 
@@ -167,9 +189,31 @@ app.put('/itens/:id', upload.single('foto'), (req, res) => {
 });
 
 app.delete('/itens/:id', (req, res) => {
-    db.query(`DELETE FROM itens WHERE id = ?`, [req.params.id], (err) => {
-        if (err) return res.status(500).json({ erro: err.message });
-        res.json({ mensagem: 'Item removido do acervo!' });
+    const { id } = req.params;
+
+    // 1. Verifica se o item está emprestado neste momento (data_devolucao é NULL)
+    const queryVerificacao = `SELECT id FROM emprestimos WHERE item_id = ? AND data_devolucao IS NULL`;
+    
+    db.query(queryVerificacao, [id], (err, results) => {
+        if (err) {
+            console.error("[ERRO VERIFICAÇÃO EXCLUSÃO ITEM]:", err.message);
+            return res.status(500).json({ erro: err.message });
+        }
+
+        // Se a lista for maior que 0, significa que alguém ainda não devolveu o item!
+        if (results.length > 0) {
+            console.log(`[BLOQUEIO] Tentativa de apagar o item ${id} bloqueada (está emprestado).`);
+            return res.status(400).json({ erro: 'Não é possível remover este item. Ele encontra-se emprestado a um membro!' });
+        }
+
+        // 2. Se passou na validação, podemos apagar o item em segurança
+        db.query(`DELETE FROM itens WHERE id = ?`, [id], (errDelete) => {
+            if (errDelete) {
+                console.error("[ERRO DELETE ITEM]:", errDelete.message);
+                return res.status(500).json({ erro: errDelete.message });
+            }
+            res.json({ mensagem: 'Item removido do acervo!' });
+        });
     });
 });
 
@@ -192,20 +236,28 @@ app.get('/itens/:id/historico', (req, res) => {
 // ==========================================
 app.post('/emprestar', (req, res) => {
     const { item_id, usuario_id } = req.body;
+    console.log(`[EMPRESTAR] Tentando emprestar Item ${item_id} para Usuário ${usuario_id}`);
 
-    // 1. Verifica se o item JÁ ESTÁ emprestado (data_devolucao é nula)
+    // 1. Verifica se já está emprestado
     db.query(`SELECT id FROM emprestimos WHERE item_id = ? AND data_devolucao IS NULL`, [item_id], (err, results) => {
-        if (err) return res.status(500).json({ erro: err.message });
+        if (err) {
+            console.error("[ERRO SELECT EMPRESTIMO]:", err.message);
+            return res.status(500).json({ erro: err.message });
+        }
         
-        // Se achou um registro, é porque o item ainda não foi devolvido!
         if (results.length > 0) {
+            console.log("[AVISO] Item já emprestado.");
             return res.status(400).json({ erro: 'Este item já está emprestado para outra pessoa!' });
         }
 
-        // 2. Se passou na validação, registra o novo empréstimo
-        db.query(`INSERT INTO emprestimos (item_id, usuario_id, data_emprestimo) VALUES (?, ?, CURRENT_DATE)`, 
-        [item_id, usuario_id], (err) => {
-            if (err) return res.status(500).json({ erro: err.message });
+        // 2. Registra o empréstimo usando CURDATE()
+        db.query(`INSERT INTO emprestimos (item_id, usuario_id, data_emprestimo) VALUES (?, ?, CURDATE())`, 
+        [item_id, usuario_id], (err, insertRes) => {
+            if (err) {
+                console.error("[ERRO INSERT EMPRESTIMO]:", err.message);
+                return res.status(500).json({ erro: err.message });
+            }
+            console.log(`[SUCESSO] Empréstimo ${insertRes.insertId} registrado!`);
             res.status(201).json({ mensagem: 'Empréstimo registrado com sucesso!' });
         });
     });
