@@ -39,22 +39,22 @@ const upload = multer({ storage: storage });
 app.post('/login', (req, res) => {
     const { email, senha } = req.body;
     
-    db.query(`SELECT * FROM usuarios WHERE email = ?`, [email], async (err, results) => {
-        if (err) return res.status(500).json({ erro: err.message });
-        
-        // Se não achou o e-mail
+    // Mudamos para uma query simples e tratamos o async dentro do callback
+    db.query('SELECT * FROM usuarios WHERE email = ?', [email], async (err, results) => {
+        if (err) return res.status(500).json({ erro: 'Erro interno no servidor' });
         if (results.length === 0) return res.status(401).json({ erro: 'Email ou senha incorretos!' });
         
-        const user = results[0];
-        
-        // Compara a senha digitada em texto com a senha embaralhada no banco
-        const senhaValida = await bcrypt.compare(senha, user.senha);
-        if (!senhaValida) return res.status(401).json({ erro: 'Email ou senha incorretos!' });
-        
-        res.json({ id: user.id, nome: user.nome, email: user.email, perfil: user.perfil });
+        try {
+            const user = results[0];
+            const senhaValida = await bcrypt.compare(senha, user.senha);
+            if (!senhaValida) return res.status(401).json({ erro: 'Email ou senha incorretos!' });
+            
+            res.json({ id: user.id, nome: user.nome, email: user.email, perfil: user.perfil });
+        } catch (error) {
+            res.status(500).json({ erro: 'Erro ao processar login' });
+        }
     });
 });
-
 // ==========================================
 // 3. ROTAS PARA CATEGORIAS
 // ==========================================
