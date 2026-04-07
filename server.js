@@ -164,7 +164,7 @@ app.delete('/usuarios/:id', (req, res) => {
 // ==========================================
 app.post('/itens', upload.single('foto'), (req, res) => {
     const { titulo, tipo, consumido, categoria_id } = req.body;
-    const foto_url = req.file ? `http://localhost:3001/uploads/${req.file.filename}` : null;
+    const foto_url = req.file ? `https://geektrack-backend.onrender.com/uploads/${req.file.filename}` : null;
     const valorConsumido = (consumido === 'true') ? 1 : 0; 
 
     const query = `INSERT INTO itens (titulo, tipo, foto_url, consumido, categoria_id) VALUES (?, ?, ?, ?, ?)`;
@@ -197,7 +197,7 @@ app.get('/itens', (req, res) => {
 app.put('/itens/:id', upload.single('foto'), (req, res) => {
     const { id } = req.params; 
     const { titulo, tipo, consumido, categoria_id, foto_url_existente } = req.body;
-    const foto_url = req.file ? `http://localhost:3001/uploads/${req.file.filename}` : foto_url_existente;
+    const foto_url = req.file ? `https://geektrack-backend.onrender.com/uploads/${req.file.filename}` : foto_url_existente;
     const valorConsumido = (consumido === 'true' || consumido === true || consumido === 1) ? 1 : 0; 
 
     const query = `UPDATE itens SET titulo = ?, tipo = ?, foto_url = ?, consumido = ?, categoria_id = ? WHERE id = ?`;
