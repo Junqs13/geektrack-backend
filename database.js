@@ -1,17 +1,11 @@
 const mysql = require('mysql2');
 require('dotenv').config();
 
-// 1. Pega a URL do Render e remove espaços em branco acidentais no início ou no fim
-let dbUrl = process.env.DATABASE_URL ? process.env.DATABASE_URL.trim() : '';
+const dbUrl = process.env.DATABASE_URL ? process.env.DATABASE_URL.trim() : '';
+const finalUrl = dbUrl.includes('?') ? dbUrl.split('?')[0] : dbUrl;
 
-// 2. Remove a parte "?ssl-mode=REQUIRED" que causa conflito no Node.js
-if (dbUrl.includes('?')) {
-    dbUrl = dbUrl.split('?')[0];
-}
-
-// 3. Tenta conectar com a URL limpa
 const db = mysql.createConnection({
-    uri: dbUrl,
+    uri: finalUrl,
     ssl: {
         rejectUnauthorized: false
     }
@@ -19,9 +13,9 @@ const db = mysql.createConnection({
 
 db.connect((err) => {
     if (err) {
-        console.error('❌ Erro ao conectar ao banco MySQL na nuvem:', err.message);
+        console.error('❌ Erro de conexão MySQL:', err.message);
     } else {
-        console.log('✅ Conectado com sucesso ao MySQL na nuvem (Aiven)!');
+        console.log('✅ Conectado ao MySQL na nuvem!');
     }
 });
 
