@@ -34,24 +34,43 @@ const storage = multer.diskStorage({
 const upload = multer({ storage: storage });
 
 // ==========================================
-// 2. ROTA DE LOGIN (AUTENTICAÇÃO SEGURO)
+// 2. ROTA DE LOGIN (AUTENTICAÇÃO SEGURA)
 // ==========================================
 app.post('/login', (req, res) => {
     const { email, senha } = req.body;
+    console.log(`[LOGIN] Tentativa de login para o e-mail: ${email}`);
     
-    // Mudamos para uma query simples e tratamos o async dentro do callback
-    db.query('SELECT * FROM usuarios WHERE email = ?', [email], async (err, results) => {
-        if (err) return res.status(500).json({ erro: 'Erro interno no servidor' });
-        if (results.length === 0) return res.status(401).json({ erro: 'Email ou senha incorretos!' });
+    db.query(`SELECT * FROM usuarios WHERE email = ?`, [email], async (err, results) => {
+        // 1. Se o banco de dados falhar
+        if (err) {
+            console.error("[LOGIN ERRO BANCO]:", err.message);
+            return res.status(500).json({ erro: 'Erro interno no banco de dados' });
+        }
         
+        // 2. Se não achar o e-mail
+        if (results.length === 0) {
+            console.log("[LOGIN AVISO] E-mail não encontrado no banco.");
+            return res.status(401).json({ erro: 'Email ou senha incorretos!' });
+        }
+        
+        // 3. Verifica a senha com Try/Catch para não quebrar o servidor
         try {
             const user = results[0];
-            const senhaValida = await bcrypt.compare(senha, user.senha);
-            if (!senhaValida) return res.status(401).json({ erro: 'Email ou senha incorretos!' });
+            console.log(`[LOGIN] E-mail encontrado (${user.nome}). Comparando senhas...`);
             
+            const senhaValida = await bcrypt.compare(senha, user.senha);
+            
+            if (!senhaValida) {
+                console.log("[LOGIN AVISO] Senha inválida digitada.");
+                return res.status(401).json({ erro: 'Email ou senha incorretos!' });
+            }
+            
+            console.log(`[LOGIN SUCESSO] Bem-vindo, ${user.nome}!`);
             res.json({ id: user.id, nome: user.nome, email: user.email, perfil: user.perfil });
+            
         } catch (error) {
-            res.status(500).json({ erro: 'Erro ao processar login' });
+            console.error("[LOGIN ERRO BCRYPT]:", error.message);
+            res.status(500).json({ erro: 'Erro ao processar a criptografia da senha' });
         }
     });
 });
