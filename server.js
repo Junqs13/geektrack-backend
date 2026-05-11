@@ -200,25 +200,25 @@ app.put('/devolver/:id', (req, res) => {
 });
 
 // Estatísticas
-app.get('/estatisticas', (req, res) => {
-    const stats = {};
-    const q1 = `SELECT i.titulo, COUNT(e.id) AS total_vezes FROM emprestimos e JOIN itens i ON e.item_id = i.id GROUP BY i.id ORDER BY total_vezes DESC LIMIT 5`;
-    const q2 = `SELECT u.nome, COUNT(e.id) AS total_pegos FROM emprestimos e JOIN usuarios u ON e.usuario_id = u.id GROUP BY u.id ORDER BY total_pegos DESC LIMIT 5`;
-    const q3 = `SELECT i.titulo, u.nome AS usuario, e.data_emprestimo, DATEDIFF(CURRENT_DATE, e.data_emprestimo) AS dias_atraso FROM emprestimos e JOIN itens i ON e.item_id = i.id JOIN usuarios u ON e.usuario_id = u.id WHERE e.data_devolucao IS NULL AND DATEDIFF(CURRENT_DATE, e.data_emprestimo) > 14 ORDER BY dias_atraso DESC`;
+app.get('/estatisticas', async (req, res) => {
+    try {
+        const dbPromise = db.promise(); // Transforma o pool em versão moderna
+        
+        // 1. Buscas antigas (Top 5 e Atrasados)
+        const [topItens] = await dbPromise.query(`SELECT i.titulo, COUNT(e.id) AS total_vezes FROM emprestimos e JOIN itens i ON e.item_id = i.id GROUP BY i.id ORDER BY total_vezes DESC LIMIT 5`);
+        const [topUsuarios] = await dbPromise.query(`SELECT u.nome, COUNT(e.id) AS total_pegos FROM emprestimos e JOIN usuarios u ON e.usuario_id = u.id GROUP BY u.id ORDER BY total_pegos DESC LIMIT 5`);
+        const [atrasados] = await dbPromise.query(`SELECT i.titulo, u.nome AS usuario, e.data_emprestimo, DATEDIFF(CURRENT_DATE, e.data_emprestimo) AS dias_atraso FROM emprestimos e JOIN itens i ON e.item_id = i.id JOIN usuarios u ON e.usuario_id = u.id WHERE e.data_devolucao IS NULL AND DATEDIFF(CURRENT_DATE, e.data_emprestimo) > 14 ORDER BY dias_atraso DESC`);
+        
+        // 2. NOVAS BUSCAS (Categorias, Tipos e Timeline)
+        const [porCategoria] = await dbPromise.query(`SELECT c.nome, COUNT(i.id) AS total FROM categorias c LEFT JOIN itens i ON c.id = i.categoria_id GROUP BY c.id HAVING total > 0 ORDER BY total DESC`);
+        const [porTipo] = await dbPromise.query(`SELECT tipo, COUNT(id) AS total FROM itens GROUP BY tipo ORDER BY total DESC`);
+        const [ultimasMovimentacoes] = await dbPromise.query(`SELECT i.titulo, u.nome AS usuario, e.data_emprestimo, e.data_devolucao FROM emprestimos e JOIN itens i ON e.item_id = i.id JOIN usuarios u ON e.usuario_id = u.id ORDER BY e.id DESC LIMIT 5`);
 
-    db.query(q1, (err, res1) => {
-        if (err) return res.status(500).json({erro: err.message});
-        stats.topItens = res1;
-        db.query(q2, (err, res2) => {
-            if (err) return res.status(500).json({erro: err.message});
-            stats.topUsuarios = res2;
-            db.query(q3, (err, res3) => {
-                if (err) return res.status(500).json({erro: err.message});
-                stats.atrasados = res3;
-                res.json(stats);
-            });
-        });
-    });
+        // Envia o pacote completo para o Front-end
+        res.json({ topItens, topUsuarios, atrasados, porCategoria, porTipo, ultimasMovimentacoes });
+    } catch (err) {
+        res.status(500).json({ erro: err.message });
+    }
 });
 
 app.listen(PORT, () => {
